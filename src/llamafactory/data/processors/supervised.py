@@ -17,8 +17,12 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 from ...extras.constants import IGNORE_INDEX
 from ...extras.logging import get_logger
-from .processor_utils import get_paligemma_token_type_ids, get_pixel_values, greedy_knapsack, infer_seqlen
-
+from .processor_utils import (
+    get_paligemma_token_type_ids,
+    get_pixel_values,
+    greedy_knapsack,
+    infer_seqlen,
+)
 
 if TYPE_CHECKING:
     from transformers import PreTrainedTokenizer, ProcessorMixin
@@ -52,25 +56,31 @@ def _encode_supervised_example(
         labels += [IGNORE_INDEX] * getattr(processor, "image_seq_length")
 
     encoded_pairs = template.encode_multiturn(tokenizer, messages, system, tools)
+
     total_length = 1 if template.efficient_eos else 0
     for turn_idx, (source_ids, target_ids) in enumerate(encoded_pairs):
         if total_length >= data_args.cutoff_len:
+            logger.warning("Cut multi-turn conversation at Turn #{} .The multi-turn is a lengthy example with length {} > {}.".format(turn_idx, total_length, data_args.cutoff_len))
             break
 
         source_len, target_len = infer_seqlen(len(source_ids), len(target_ids), data_args.cutoff_len - total_length)
         source_ids = source_ids[:source_len]
         target_ids = target_ids[:target_len]
-        total_length += source_len + target_len
+        total_length += len(source_ids) + len(target_ids) 
+
 
         if data_args.train_on_prompt:
             source_mask = source_ids
         elif turn_idx != 0 and template.efficient_eos:
-            source_mask = [tokenizer.eos_token_id] + [IGNORE_INDEX] * (source_len - 1)
+            source_mask = [tokenizer.eos_token_id] + [IGNORE_INDEX] * (len(source_ids) - 1)
         else:
-            source_mask = [IGNORE_INDEX] * source_len
+            source_mask = [IGNORE_INDEX] * len(source_ids)
 
         input_ids += source_ids + target_ids
         labels += source_mask + target_ids
+    print(len(prompt))
+    print(len(input_ids))
+    print('-'*100)
 
     if template.efficient_eos:
         input_ids += [tokenizer.eos_token_id]
@@ -93,6 +103,7 @@ def preprocess_supervised_dataset(
         model_inputs["pixel_values"] = []
         if hasattr(processor, "image_seq_length"):  # paligemma models
             model_inputs["token_type_ids"] = []
+
 
     for i in range(len(examples["prompt"])):
         if len(examples["prompt"][i]) % 2 != 1 or len(examples["response"][i]) != 1:
